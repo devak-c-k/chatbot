@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect,useRef } from "react";
 import { useChat } from "@ai-sdk/react";
 import { Loader2, Plus, AlertTriangle, RefreshCw, Image as ImageIcon } from "lucide-react";
 import {
@@ -209,12 +209,11 @@ export default function ChatPage() {
                     if (part.type === 'text') {
                       if (message.role === 'assistant') {
                         return (
-                          <Response
+                          <CharStream
                             key={key}
+                            text={part.text}
                             className="prose dark:prose-invert max-w-none text-sm leading-relaxed"
-                          >
-                            {part.text}
-                          </Response>
+                          />
                         );
                       }
                       return (
@@ -363,5 +362,49 @@ export default function ChatPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+//stream text component
+function CharStream({ text, className }: { text: string; className?: string }) {
+  const [displayed, setDisplayed] = useState('');
+  const targetRef = useRef(text);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (text.length <= displayed.length) {
+      setDisplayed(text);
+      targetRef.current = text;
+      return;
+    }
+
+    targetRef.current = text;
+    let i = displayed.length;
+    const step = () => {
+      const tgt = targetRef.current;
+      if (i < tgt.length) {
+        i += 1;
+        setDisplayed(tgt.slice(0, i));
+        rafRef.current = window.setTimeout(step, 10);
+      } else {
+        rafRef.current = null;
+      }
+    };
+    if (rafRef.current == null) {
+      rafRef.current = window.setTimeout(step, 10);
+    }
+
+    return () => {
+      if (rafRef.current != null) {
+        clearTimeout(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [text]);
+
+  return (
+    <Response className={className}>
+      {displayed}
+    </Response>
   );
 }
