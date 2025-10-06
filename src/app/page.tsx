@@ -19,6 +19,48 @@ import {
   PromptInputAttachment,
 } from "@/components/ai-elements/prompt-input";
 
+// Storage key for persisting chat sessions
+const STORAGE_KEY = "chat_sessions";
+const CURRENT_CHAT_KEY = "current_chat_id";
+
+// Helper to save messages to localStorage
+function saveToStorage(chatId: string, messages: any[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const sessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    sessions[chatId] = {
+      messages,
+      lastUpdated: Date.now(),
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    localStorage.setItem(CURRENT_CHAT_KEY, chatId);
+  } catch (e) {
+    console.error('Failed to save to storage:', e);
+  }
+}
+
+// Helper to load messages from localStorage
+function loadFromStorage(chatId: string): any[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const sessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    return sessions[chatId]?.messages || [];
+  } catch (e) {
+    console.error('Failed to load from storage:', e);
+    return [];
+  }
+}
+
+// Helper to get last active chat ID
+function getLastChatId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(CURRENT_CHAT_KEY);
+  } catch (e) {
+    return null;
+  }
+}
+
 // Small helper component to render an image add button inside the PromptInput context
 function AddImageButton() {
   const { openFileDialog, files } = usePromptInputAttachments();
@@ -41,11 +83,17 @@ function AddImageButton() {
 export default function ChatPage() {
   const [input, setInput] = useState("");
   const [rateLimited, setRateLimited] = useState(false);
-  const [chatId, setChatId] = useState<string>(() => `chat-${Date.now()}`);
   const [thinking, setThinking] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [webSearching, setWebSearching] = useState(false);
+
+  // Initialize chatId - restore last session or create new one
+  const [chatId, setChatId] = useState<string>(() => {
+    if (typeof window === 'undefined') return `chat-${Date.now()}`;
+    const lastId = getLastChatId();
+    return lastId || `chat-${Date.now()}`;
+  });
 
   // Set mounted flag to avoid hydration issues
   useEffect(() => {
@@ -63,6 +111,23 @@ export default function ChatPage() {
     },
   });
 
+  // Load messages from storage when component mounts or chatId changes
+  useEffect(() => {
+    if (mounted) {
+      const storedMessages = loadFromStorage(chatId);
+      if (storedMessages.length > 0) {
+        setMessages(storedMessages);
+      }
+    }
+  }, [chatId, mounted, setMessages]);
+
+  // Save messages to storage whenever they change
+  useEffect(() => {
+    if (mounted && messages.length > 0) {
+      saveToStorage(chatId, messages);
+    }
+  }, [messages, chatId, mounted]);
+
   useEffect(() => {
     if (status !== 'streaming' && status !== 'submitted') {
       setThinking(false);
@@ -72,10 +137,11 @@ export default function ChatPage() {
   const isLoading = status === "streaming" || status === "submitted" || thinking;
 
   function startNewChat() {
-    // Clear all messages
+    // Generate new unique chat ID
+    const newChatId = `chat-${Date.now()}`;
+    setChatId(newChatId);
+    // Clear messages (will trigger save of empty array to new chatId)
     setMessages([]);
-    // Generate new unique chat ID to force fresh session
-    setChatId(`chat-${Date.now()}`);
     // Reset all state
     setInput('');
     setRateLimited(false);
@@ -83,7 +149,7 @@ export default function ChatPage() {
   }
 
   return (
-  <div className="flex flex-col h-screen bg-white dark:bg-gray-900">
+    <div className="flex flex-col h-screen bg-white dark:bg-gray-900">
       {/* Header */}
       <div className="border-b bg-white dark:bg-gray-900 sticky top-0 z-20">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -127,7 +193,7 @@ export default function ChatPage() {
         )}
       </div>
       <Conversation>
-  <ConversationContent className="max-w-4xl w-full mx-auto px-3 pb-28">
+        <ConversationContent className="max-w-4xl w-full mx-auto px-3 pb-28">
           {messages.length === 0 ? (
             <ConversationEmptyState
               title="Start a conversation"
@@ -180,7 +246,7 @@ export default function ChatPage() {
         </ConversationContent>
       </Conversation>
       {/* Composer */}
-  <div className="fixed bottom-0 left-0 right-0 border-t bg-white dark:bg-gray-900 px-3 py-3">
+      <div className="fixed bottom-0 left-0 right-0 border-t bg-white dark:bg-gray-900 px-3 py-3">
         <div className="max-w-4xl mx-auto">
           <PromptInput
             accept="image/*"
