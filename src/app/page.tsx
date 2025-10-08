@@ -200,47 +200,54 @@ export default function ChatPage() {
               description="Type a message below to begin"
             />
           ) : (
-            messages.map((message) => (
-              <Message key={message.id} from={message.role}>
-                <MessageContent>
-                  {message.parts?.map((part, i) => {
-                    const key = `${message.id}-${i}`;
-                    // Render text parts
-                    if (part.type === 'text') {
-                      if (message.role === 'assistant') {
+            messages.map((message, msgIndex) => {
+              // Only stream the last assistant message if we're currently streaming
+              const isLastMessage = msgIndex === messages.length - 1;
+              const shouldStream = isLastMessage && message.role === 'assistant' && status === 'streaming';
+              
+              return (
+                <Message key={message.id} from={message.role}>
+                  <MessageContent>
+                    {message.parts?.map((part, i) => {
+                      const key = `${message.id}-${i}`;
+                      // Render text parts
+                      if (part.type === 'text') {
+                        if (message.role === 'assistant') {
+                          return (
+                            <CharStream
+                              key={key}
+                              text={part.text}
+                              shouldAnimate={shouldStream}
+                              className="prose dark:prose-invert max-w-none text-sm leading-relaxed"
+                            />
+                          );
+                        }
                         return (
-                          <CharStream
-                            key={key}
-                            text={part.text}
-                            className="prose dark:prose-invert max-w-none text-sm leading-relaxed"
-                          />
+                          <div key={key} className="text-sm break-words whitespace-pre-wrap">
+                            {part.text}
+                          </div>
                         );
                       }
-                      return (
-                        <div key={key} className="text-sm break-words whitespace-pre-wrap">
-                          {part.text}
-                        </div>
-                      );
-                    }
-                    // Render image file parts
-                    if (part.type === 'file' && part.mediaType?.startsWith('image/')) {
-                      return (
-                        <div key={key} className="my-2">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={part.url}
-                            alt={part.filename || 'image'}
-                            className="max-h-72 rounded-md border border-gray-200 dark:border-gray-700 object-contain bg-white dark:bg-gray-900"
-                            loading="lazy"
-                          />
-                        </div>
-                      );
-                    }
-                    return null;
-                  })}
-                </MessageContent>
-              </Message>
-            ))
+                      // Render image file parts
+                      if (part.type === 'file' && part.mediaType?.startsWith('image/')) {
+                        return (
+                          <div key={key} className="my-2">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={part.url}
+                              alt={part.filename || 'image'}
+                              className="max-h-72 rounded-md border border-gray-200 dark:border-gray-700 object-contain bg-white dark:bg-gray-900"
+                              loading="lazy"
+                            />
+                          </div>
+                        );
+                      }
+                      return null;
+                    })}
+                  </MessageContent>
+                </Message>
+              );
+            })
           )}
         </ConversationContent>
       </Conversation>
@@ -366,41 +373,86 @@ export default function ChatPage() {
 }
 
 //stream text component
-function CharStream({ text, className }: { text: string; className?: string }) {
-  const [displayed, setDisplayed] = useState('');
+function CharStream({ text, className, shouldAnimate = false }: { text: string; className?: string; shouldAnimate?: boolean }) {
+  const [displayed, setDisplayed] = useState(shouldAnimate ? '' : text);
   const targetRef = useRef(text);
+  const displayedRef = useRef(displayed);
   const rafRef = useRef<number | null>(null);
+  const isAnimatingRef = useRef(false);
+
+  // Keep refs in sync
+  useEffect(() => {
+    targetRef.current = text;
+    displayedRef.current = displayed;
+  }, [text, displayed]);
 
   useEffect(() => {
-    if (text.length <= displayed.length) {
+    // If we shouldn't animate, display text immediately
+    if (!shouldAnimate) {
+      if (rafRef.current) {
+        clearTimeout(rafRef.current);
+        rafRef.current = null;
+      }
+      isAnimatingRef.current = false;
       setDisplayed(text);
-      targetRef.current = text;
       return;
     }
 
-    targetRef.current = text;
-    let i = displayed.length;
-    const step = () => {
-      const tgt = targetRef.current;
-      if (i < tgt.length) {
-        i += 1;
-        setDisplayed(tgt.slice(0, i));
-        rafRef.current = window.setTimeout(step, 10);
-      } else {
+    // If text got shorter (message replaced), reset and display immediately
+    if (text.length < displayedRef.current.length) {
+      if (rafRef.current) {
+        clearTimeout(rafRef.current);
         rafRef.current = null;
       }
-    };
-    if (rafRef.current == null) {
-      rafRef.current = window.setTimeout(step, 10);
+      isAnimatingRef.current = false;
+      setDisplayed(text);
+      return;
     }
+
+    // If we're already animating or all text is displayed, don't start a new animation
+    if (isAnimatingRef.current || displayedRef.current.length >= text.length) {
+      return;
+    }
+
+    // Start streaming animation
+    isAnimatingRef.current = true;
+    let currentIndex = displayedRef.current.length;
+
+    const step = () => {
+      const targetText = targetRef.current;
+      const displayedLength = displayedRef.current.length;
+
+      // Check if we need to continue
+      if (displayedLength >= targetText.length) {
+        rafRef.current = null;
+        isAnimatingRef.current = false;
+        return;
+      }
+
+      // Stream multiple characters at once for better performance with long text
+      const charsPerFrame = Math.max(1, Math.ceil((targetText.length - displayedLength) / 100));
+      currentIndex = Math.min(displayedLength + charsPerFrame, targetText.length);
+      
+      setDisplayed(targetText.slice(0, currentIndex));
+      
+      if (currentIndex < targetText.length) {
+        rafRef.current = window.setTimeout(step, 15);
+      } else {
+        rafRef.current = null;
+        isAnimatingRef.current = false;
+      }
+    };
+
+    rafRef.current = window.setTimeout(step, 15);
 
     return () => {
       if (rafRef.current != null) {
         clearTimeout(rafRef.current);
         rafRef.current = null;
       }
+      isAnimatingRef.current = false;
     };
-  }, [text]);
+  }, [text, shouldAnimate]);
 
   return (
     <Response className={className}>
