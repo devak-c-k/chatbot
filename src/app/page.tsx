@@ -436,14 +436,14 @@ function CharStream({ text, className, shouldAnimate = false }: { text: string; 
       setDisplayed(targetText.slice(0, currentIndex));
       
       if (currentIndex < targetText.length) {
-        rafRef.current = window.setTimeout(step, 8);
+        rafRef.current = window.setTimeout(step, 15);
       } else {
         rafRef.current = null;
         isAnimatingRef.current = false;
       }
     };
 
-    rafRef.current = window.setTimeout(step, 8);
+    rafRef.current = window.setTimeout(step, 15);
 
     return () => {
       if (rafRef.current != null) {
